@@ -18,25 +18,26 @@ async function signup() {
   // 1. Get challenge from server
   const initResponse = await fetch(
     `${SERVER_URL}/init-register?email=${email}`,
-    { credentials: "include" }
-  )
+    { credentials: "omit" }
+  );
   const options = await initResponse.json()
   if (!initResponse.ok) {
     showModalText(options.error)
   }
 
   // 2. Create passkey
-  const registrationJSON = await startRegistration(options)
+  const { sessionId, ...webauthnOptions } = options;
+  const registrationJSON = await startRegistration(webauthnOptions);
 
   // 3. Save passkey in DB
   const verifyResponse = await fetch(`${SERVER_URL}/verify-register`, {
-    credentials: "include",
+    credentials: "omit",
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(registrationJSON),
-  })
+    body: JSON.stringify({ ...registrationJSON, sessionId }),
+  });
 
   const verifyData = await verifyResponse.json()
   if (!verifyResponse.ok) {
@@ -54,25 +55,26 @@ async function login() {
 
   // 1. Get challenge from server
   const initResponse = await fetch(`${SERVER_URL}/init-auth?email=${email}`, {
-    credentials: "include",
-  })
+    credentials: "omit",
+  });
   const options = await initResponse.json()
   if (!initResponse.ok) {
     showModalText(options.error)
   }
 
   // 2. Get passkey
-  const authJSON = await startAuthentication(options)
+  const { sessionId, ...webauthnOptions } = options;
+  const authJSON = await startAuthentication(webauthnOptions);
 
   // 3. Verify passkey with DB
   const verifyResponse = await fetch(`${SERVER_URL}/verify-auth`, {
-    credentials: "include",
+    credentials: "omit",
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(authJSON),
-  })
+    body: JSON.stringify({ ...authJSON, sessionId }),
+  });
 
   const verifyData = await verifyResponse.json()
   if (!verifyResponse.ok) {

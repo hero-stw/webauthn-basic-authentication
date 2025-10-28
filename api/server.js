@@ -7,6 +7,7 @@ const {
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const crypto = require("crypto");
 const {
   getUserByEmail,
   createUser,
@@ -34,6 +35,18 @@ function parseJsonOrNull(value) {
   }
 }
 
+// In-memory, short-lived session stores for stateless (cookie-less) challenge tracking
+const regSessions = new Map(); // sessionId -> { userId, email, challenge, expires }
+const authSessions = new Map(); // sessionId -> { userId, challenge, expires }
+
+function createSessionId() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+function isExpired(expires) {
+  return typeof expires === "number" && Date.now() > expires;
+}
+
 app.get("/init-register", async (req, res) => {
   const email = req.query.email;
   if (!email) {
@@ -50,23 +63,24 @@ app.get("/init-register", async (req, res) => {
     userName: email,
   });
 
-  res.cookie(
-    "regInfo",
-    JSON.stringify({
-      userId: options.user.id,
-      email,
-      challenge: options.challenge,
-    }),
-    { httpOnly: true, maxAge: 60000, secure: true, sameSite: "none" }
-  );
+  // Track challenge server-side using a short-lived sessionId returned to the client
+  const sessionId = createSessionId();
+  regSessions.set(sessionId, {
+    userId: options.user.id,
+    email,
+    challenge: options.challenge,
+    expires: Date.now() + 60000,
+  });
 
-  res.json(options);
+  res.json({ ...options, sessionId });
 });
 
 app.post("/verify-register", async (req, res) => {
-  const regInfo = parseJsonOrNull(req.cookies.regInfo);
+  const sessionId = req.body.sessionId;
+  const regInfo = sessionId ? regSessions.get(sessionId) : null;
 
-  if (!regInfo) {
+  if (!regInfo || isExpired(regInfo.expires)) {
+    if (sessionId) regSessions.delete(sessionId);
     return res.status(400).json({ error: "Registration info not found" });
   }
 
@@ -86,7 +100,7 @@ app.post("/verify-register", async (req, res) => {
       backedUp: verification.registrationInfo.credentialBackedUp,
       transport: req.body.transports,
     });
-    res.clearCookie("regInfo");
+    regSessions.delete(sessionId);
     return res.json({ verified: verification.verified });
   } else {
     return res
@@ -117,22 +131,23 @@ app.get("/init-auth", async (req, res) => {
     ],
   });
 
-  res.cookie(
-    "authInfo",
-    JSON.stringify({
-      userId: user.id,
-      challenge: options.challenge,
-    }),
-    { httpOnly: true, maxAge: 60000, secure: true, sameSite: "none" }
-  );
+  // Track challenge server-side using a short-lived sessionId returned to the client
+  const sessionId = createSessionId();
+  authSessions.set(sessionId, {
+    userId: user.id,
+    challenge: options.challenge,
+    expires: Date.now() + 60000,
+  });
 
-  res.json(options);
+  res.json({ ...options, sessionId });
 });
 
 app.post("/verify-auth", async (req, res) => {
-  const authInfo = parseJsonOrNull(req.cookies.authInfo);
+  const sessionId = req.body.sessionId;
+  const authInfo = sessionId ? authSessions.get(sessionId) : null;
 
-  if (!authInfo) {
+  if (!authInfo || isExpired(authInfo.expires)) {
+    if (sessionId) authSessions.delete(sessionId);
     return res.status(400).json({ error: "Authentication info not found" });
   }
 
@@ -156,7 +171,7 @@ app.post("/verify-auth", async (req, res) => {
 
   if (verification.verified) {
     updateUserCounter(user.id, verification.authenticationInfo.newCounter);
-    res.clearCookie("authInfo");
+    authSessions.delete(sessionId);
     // Save user in a session cookie
     return res.json({ verified: verification.verified });
   } else {
