@@ -3,26 +3,36 @@ const {
   verifyRegistrationResponse,
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
-} = require("@simplewebauthn/server")
-const express = require("express")
-const cors = require("cors")
-const cookieParser = require("cookie-parser")
+} = require("@simplewebauthn/server");
+const express = require("express");
+const cors = require("cors");
+const cookieParser = require("cookie-parser");
 const {
   getUserByEmail,
   createUser,
   updateUserCounter,
   getUserById,
-} = require("./db")
+} = require("./db");
 
-const app = express()
-app.use(express.json())
-app.use(cookieParser())
+const app = express();
+app.use(express.json());
+app.use(cookieParser());
+app.set("trust proxy", 1);
 
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 const RP_ID = process.env.RP_ID || "localhost";
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({ origin: CLIENT_URL, credentials: true }));
+
+function parseJsonOrNull(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    return null;
+  }
+}
 
 app.get("/init-register", async (req, res) => {
   const email = req.query.email;
@@ -54,10 +64,10 @@ app.get("/init-register", async (req, res) => {
 });
 
 app.post("/verify-register", async (req, res) => {
-  const regInfo = JSON.parse(req.cookies.regInfo)
+  const regInfo = parseJsonOrNull(req.cookies.regInfo);
 
   if (!regInfo) {
-    return res.status(400).json({ error: "Registration info not found" })
+    return res.status(400).json({ error: "Registration info not found" });
   }
 
   const verification = await verifyRegistrationResponse({
@@ -65,7 +75,7 @@ app.post("/verify-register", async (req, res) => {
     expectedChallenge: regInfo.challenge,
     expectedOrigin: CLIENT_URL,
     expectedRPID: RP_ID,
-  })
+  });
 
   if (verification.verified) {
     createUser(regInfo.userId, regInfo.email, {
@@ -75,15 +85,15 @@ app.post("/verify-register", async (req, res) => {
       deviceType: verification.registrationInfo.credentialDeviceType,
       backedUp: verification.registrationInfo.credentialBackedUp,
       transport: req.body.transports,
-    })
-    res.clearCookie("regInfo")
-    return res.json({ verified: verification.verified })
+    });
+    res.clearCookie("regInfo");
+    return res.json({ verified: verification.verified });
   } else {
     return res
       .status(400)
-      .json({ verified: false, error: "Verification failed" })
+      .json({ verified: false, error: "Verification failed" });
   }
-})
+});
 
 app.get("/init-auth", async (req, res) => {
   const email = req.query.email;
@@ -120,7 +130,7 @@ app.get("/init-auth", async (req, res) => {
 });
 
 app.post("/verify-auth", async (req, res) => {
-  const authInfo = JSON.parse(req.cookies.authInfo);
+  const authInfo = parseJsonOrNull(req.cookies.authInfo);
 
   if (!authInfo) {
     return res.status(400).json({ error: "Authentication info not found" });
